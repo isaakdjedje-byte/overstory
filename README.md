@@ -1,17 +1,16 @@
-# Overstory
+# Overstory for OpenCode
 
-[![CI](https://img.shields.io/github/actions/workflow/status/jayminwest/overstory/ci.yml?branch=main)](https://github.com/jayminwest/overstory/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bun](https://img.shields.io/badge/Bun-%E2%89%A51.0-orange)](https://bun.sh)
-[![GitHub release](https://img.shields.io/github/v/release/jayminwest/overstory)](https://github.com/jayminwest/overstory/releases)
+[![OpenCode](https://img.shields.io/badge/OpenCode-Compatible-blue)](https://opencode.ai)
 
-Project-agnostic swarm system for Claude Code agent orchestration. Overstory turns a single Claude Code session into a multi-agent team by spawning worker agents in git worktrees via tmux, coordinating them through a custom SQLite mail system, and merging their work back with tiered conflict resolution.
+**Multi-agent orchestration system for OpenCode** — Spawn worker agents in git worktrees, coordinate through SQLite mail, merge with tiered conflict resolution.
 
-> **⚠️ Warning: Agent swarms are not a universal solution.** Do not deploy Overstory without understanding the risks of multi-agent orchestration — compounding error rates, cost amplification, debugging complexity, and merge conflicts are the normal case, not edge cases. Read [STEELMAN.md](STEELMAN.md) for a full risk analysis and the [Agentic Engineering Book](https://github.com/jayminwest/agentic-engineering-book) ([web version](https://jayminwest.com/agentic-engineering-book)) before using this tool in production.
+> **⚠️ Fork Notice**: This is an OpenCode-compatible fork of [jayminwest/overstory](https://github.com/jayminwest/overstory). The original was designed for Claude Code; this version has been adapted to work with OpenCode using a hybrid spawning approach (Bun.spawn + Task tool).
 
 ## How It Works
 
-CLAUDE.md + hooks + the `ov` CLI turn your Claude Code session into a multi-agent orchestrator. A persistent coordinator agent manages task decomposition and dispatch, while a mechanical watchdog daemon monitors agent health in the background.
+SKILL.md + OpenCode plugin + the `ov` CLI turn your OpenCode session into a multi-agent orchestrator. A persistent coordinator agent manages task decomposition and dispatch, while ephemeral task agents execute specific work, all coordinated through a custom SQLite mail system.
 
 ```
 Coordinator (persistent orchestrator at project root)
@@ -21,42 +20,45 @@ Coordinator (persistent orchestrator at project root)
 
 ### Agent Types
 
-| Agent | Role | Access |
-|-------|------|--------|
-| **Coordinator** | Persistent orchestrator — decomposes objectives, dispatches agents, tracks task groups | Read-only |
-| **Supervisor** | Per-project team lead — manages worker lifecycle, handles nudge/escalation | Read-only |
-| **Scout** | Read-only exploration and research | Read-only |
-| **Builder** | Implementation and code changes | Read-write |
-| **Reviewer** | Validation and code review | Read-only |
-| **Lead** | Team coordination, can spawn sub-workers | Read-write |
-| **Merger** | Branch merge specialist | Read-write |
-| **Monitor** | Tier 2 continuous fleet patrol — ongoing health monitoring | Read-only |
+| Agent | Role | Spawn Method | Persistence |
+|-------|------|--------------|---------------|
+| **Coordinator** | Persistent orchestrator — decomposes objectives, dispatches agents, tracks task groups | Bun.spawn | 24/7 |
+| **Supervisor** | Per-project team lead — manages worker lifecycle, handles nudge/escalation | Bun.spawn | 24/7 |
+| **Scout** | Read-only exploration and research | Task tool | Ephemeral |
+| **Builder** | Implementation and code changes | Task tool | Ephemeral |
+| **Reviewer** | Validation and code review | Task tool | Ephemeral |
+| **Lead** | Team coordination, can spawn sub-workers | Task tool | Ephemeral |
+| **Merger** | Branch merge specialist | Task tool | Ephemeral |
+| **Monitor** | Tier 2 continuous fleet patrol — ongoing health monitoring | Bun.spawn | 24/7 |
 
 ### Key Architecture
 
+- **Hybrid Spawning**: Persistent agents (coordinator, supervisor, monitor) run as Bun.spawn subprocesses. Ephemeral agents (builder, scout, reviewer) spawn as Task tool instances.
 - **Agent Definitions**: Two-layer system — base `.md` files define the HOW (workflow), per-task overlays define the WHAT (task scope). Base definition content is injected into spawned agent overlays automatically.
 - **Messaging**: Custom SQLite mail system with typed protocol — 8 message types (`worker_done`, `merge_ready`, `dispatch`, `escalation`, etc.) for structured agent coordination, plus broadcast messaging with group addresses (`@all`, `@builders`, etc.)
 - **Worktrees**: Each agent gets an isolated git worktree — no file conflicts between agents
 - **Merge**: FIFO merge queue (SQLite-backed) with 4-tier conflict resolution
-- **Watchdog**: Tiered health monitoring — Tier 0 mechanical daemon (tmux/pid liveness), Tier 1 AI-assisted failure triage, Tier 2 monitor agent for continuous fleet patrol
-- **Tool Enforcement**: PreToolUse hooks mechanically block file modifications for non-implementation agents and dangerous git operations for all agents
+- **Watchdog**: Tiered health monitoring — Tier 0 mechanical daemon (process liveness), Tier 1 AI-assisted failure triage, Tier 2 monitor agent for continuous fleet patrol
+- **OpenCode Plugin**: Provides tool interception (`tool.execute.before`), context injection (`chat.system.transform`), and mail surfacing (`experimental.chat.messages.transform`)
 - **Task Groups**: Batch coordination with auto-close when all member issues complete
 - **Session Lifecycle**: Checkpoint save/restore for compaction survivability, handoff orchestration for crash recovery
-- **Token Instrumentation**: Session metrics extracted from Claude Code transcript JSONL files
 
 ## Requirements
 
 - [Bun](https://bun.sh) (v1.0+)
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+- [OpenCode](https://opencode.ai)
 - git
-- tmux
+- Optional: tmux (for advanced session management)
 
 ## Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/jayminwest/overstory.git
+# Clone the OpenCode fork
+git clone https://github.com/isaakdjedje-byte/overstory.git
 cd overstory
+
+# Switch to opencode-adaptation branch
+git checkout opencode-adaptation
 
 # Install dev dependencies
 bun install
@@ -72,8 +74,18 @@ bun link
 cd your-project
 ov init
 
-# Install hooks into .claude/settings.local.json
-ov hooks install
+# Configure OpenCode plugin (create opencode.json)
+cat > opencode.json << 'EOF'
+{
+  "mcp": {
+    "overstory": {
+      "type": "local",
+      "command": ["bun", "run", "path/to/overstory/opencode-plugin/index.ts"],
+      "enabled": true
+    }
+  }
+}
+EOF
 
 # Start a coordinator (persistent orchestrator)
 ov coordinator start
@@ -109,14 +121,12 @@ ov init                          Initialize .overstory/ in current project
   --name <name>                          Set project name (default: auto-detect)
 
 ov coordinator start             Start persistent coordinator agent
-  --attach / --no-attach                 TTY-aware tmux attach (default: auto)
   --watchdog                             Auto-start watchdog daemon with coordinator
   --monitor                              Auto-start Tier 2 monitor agent
 ov coordinator stop              Stop coordinator
 ov coordinator status            Show coordinator state
 
 ov supervisor start              Start per-project supervisor agent
-  --attach / --no-attach                 TTY-aware tmux attach (default: auto)
 ov supervisor stop               Stop supervisor
 ov supervisor status             Show supervisor state
 
@@ -149,7 +159,7 @@ ov dashboard                     Live TUI dashboard for agent monitoring
   --interval <ms>                        Refresh interval (default: 2000)
   --all                                  Show all runs (default: current run only)
 
-ov hooks install                 Install orchestrator hooks to .claude/settings.local.json
+ov hooks install                 Install orchestrator hooks to opencode.json
   --force                                Overwrite existing hooks
 ov hooks uninstall               Remove orchestrator hooks
 ov hooks status                  Check if hooks are installed
@@ -221,7 +231,6 @@ ov inspect <agent>               Deep per-agent inspection
   --json                                 JSON output
   --follow                               Polling mode (refreshes periodically)
   --interval <ms>                        Refresh interval for --follow
-  --no-tmux                              Skip tmux capture
   --limit <n>                            Limit events shown
 
 ov spec write <task-id>          Write a task specification
@@ -269,19 +278,45 @@ Global Flags:
   --completions <shell>                  Generate shell completions (bash, zsh, fish)
 ```
 
+## OpenCode Plugin
+
+The OpenCode plugin provides automatic integration:
+
+### Installation
+
+Add to your `opencode.json`:
+
+```json
+{
+  "mcp": {
+    "overstory": {
+      "type": "local",
+      "command": ["bun", "run", "./opencode-plugin/index.ts"],
+      "enabled": true
+    }
+  }
+}
+```
+
+### Hooks Provided
+
+- **`tool.execute.before`**: Blocks write tools for read-only agents (scout, reviewer)
+- **`chat.system.transform`**: Injects agent context (name, capability, worktree) into system prompts
+- **`experimental.chat.messages.transform`**: Surfaces unread mail messages automatically
+
 ## Tech Stack
 
 - **Runtime**: Bun (TypeScript directly, no build step)
 - **Dependencies**: Minimal runtime — `chalk` (color output), `commander` (CLI framework), core I/O via Bun built-in APIs
 - **Database**: SQLite via `bun:sqlite` (WAL mode for concurrent access)
 - **Linting**: Biome (formatter + linter)
-- **Testing**: `bun test` (2186 tests across 77 files, colocated with source)
-- **External CLIs**: `bd` (beads) or `sd` (seeds), `mulch`, `git`, `tmux` — invoked as subprocesses
+- **Testing**: `bun test` (colocated with source)
+- **External CLIs**: `bd` (beads) or `sd` (seeds), `mulch`, `git` — invoked as subprocesses
 
 ## Development
 
 ```bash
-# Run tests (2186 tests across 77 files)
+# Run tests
 bun test
 
 # Run a single test
@@ -297,84 +332,48 @@ tsc --noEmit
 bun test && biome check . && tsc --noEmit
 ```
 
-### Versioning
-
-Version is maintained in two places that must stay in sync:
-
-1. `package.json` — `"version"` field
-2. `src/index.ts` — `VERSION` constant
-
-Use the bump script to update both:
-
-```bash
-bun run version:bump <major|minor|patch>
-```
-
-Git tags, npm publishing, and GitHub releases are handled automatically by the `publish.yml` workflow when a version bump is pushed to `main`.
-
 ## Project Structure
 
 ```
 overstory/
   src/
-    index.ts                      CLI entry point (Commander.js program)
-    types.ts                      Shared types and interfaces
-    config.ts                     Config loader + validation
-    errors.ts                     Custom error types
-    json.ts                       Standardized JSON envelope helpers
-    commands/                     One file per CLI subcommand (30 commands)
-      agents.ts                   Agent discovery and querying
-      coordinator.ts              Persistent orchestrator lifecycle
-      supervisor.ts               Team lead management
-      dashboard.ts                Live TUI dashboard (ANSI via Chalk)
-      hooks.ts                    Orchestrator hooks management
-      sling.ts                    Agent spawning
-      group.ts                    Task group batch tracking
-      nudge.ts                    Agent nudging
-      mail.ts                     Inter-agent messaging
-      monitor.ts                  Tier 2 monitor management
-      merge.ts                    Branch merging
-      status.ts                   Fleet status overview
-      prime.ts                    Context priming
-      init.ts                     Project initialization
-      worktree.ts                 Worktree management
-      watch.ts                    Watchdog daemon
-      log.ts                      Hook event logging
-      logs.ts                     NDJSON log query
-      feed.ts                     Unified real-time event stream
-      run.ts                      Orchestration run lifecycle
-      trace.ts                    Agent/bead timeline viewing
-      clean.ts                    Worktree/session cleanup
-      doctor.ts                   Health check runner (9 check modules)
-      inspect.ts                  Deep per-agent inspection
-      spec.ts                     Task spec management
-      errors.ts                   Aggregated error view
-      replay.ts                   Interleaved event replay
-      stop.ts                     Agent termination
-      costs.ts                    Token/cost analysis
-      metrics.ts                  Session metrics
-      completions.ts              Shell completion generation (bash/zsh/fish)
+    index.ts                      CLI entry point
+    opencode/                     OpenCode-specific modules
+      agent-spawner.ts            Hybrid spawn dispatcher
+      persistent-agent.ts         Long-running agents
+      task-agent.ts               Ephemeral agents
+    commands/                     One file per CLI subcommand
     agents/                       Agent lifecycle management
-      manifest.ts                 Agent registry (load + query)
-      overlay.ts                  Dynamic CLAUDE.md overlay generator
-      identity.ts                 Persistent agent identity (CVs)
-      checkpoint.ts               Session checkpoint save/restore
-      lifecycle.ts                Handoff orchestration
-      hooks-deployer.ts           Deploy hooks + tool enforcement
-    worktree/                     Git worktree + tmux management
-    mail/                         SQLite mail system (typed protocol, broadcast)
+    worktree/                     Git worktree management
+    mail/                         SQLite mail system
     merge/                        FIFO queue + conflict resolution
-    watchdog/                     Tiered health monitoring (daemon, triage, health)
-    logging/                      Multi-format logger + sanitizer + reporter + color control
-    metrics/                      SQLite metrics + transcript parsing
-    doctor/                       Health check modules (9 checks)
-    insights/                     Session insight analyzer for auto-expertise
-    tracker/                      Pluggable task tracker (beads + seeds backends)
-    mulch/                        mulch CLI wrapper
-    e2e/                          End-to-end lifecycle tests
-  agents/                         Base agent definitions (.md, 8 roles) + skill definitions
-  templates/                      Templates for overlays and hooks
+    watchdog/                     Tiered health monitoring
+    ...
+  opencode-plugin/
+    index.ts                      OpenCode plugin (hooks)
+  opencode-skill/
+    SKILL.md                      OpenCode skill documentation
+  agents/                         Base agent definitions
+  templates/                      Templates for overlays
 ```
+
+## Differences from Original
+
+| Feature | Original (Claude Code) | This Fork (OpenCode) |
+|---------|------------------------|----------------------|
+| **Spawn Method** | tmux + `claude` CLI | Bun.spawn / Task tool |
+| **Persistent Agents** | tmux sessions | Bun.spawn subprocess |
+| **Ephemeral Agents** | tmux sessions | Task tool |
+| **Hooks** | `.claude/settings.local.json` | OpenCode Plugin API |
+| **Sessions** | tmux-based | Process-based |
+| **Dashboard** | ANSI TUI | CLI JSON + custom |
+
+## Documentation
+
+- **OpenCode Skill**: `opencode-skill/SKILL.md`
+- **Adaptation Guide**: `OPENCODE-ADAPTATION.md`
+- **OpenCode README**: `README-OPENCODE.md`
+- **Original**: https://github.com/jayminwest/overstory
 
 ## License
 
@@ -382,4 +381,6 @@ MIT
 
 ---
 
-Inspired by: https://github.com/steveyegge/gastown/
+**Fork**: https://github.com/isaakdjedje-byte/overstory  
+**Upstream**: https://github.com/jayminwest/overstory  
+**Inspired by**: https://github.com/steveyegge/gastown/
