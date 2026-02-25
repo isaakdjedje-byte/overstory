@@ -1,0 +1,87 @@
+---
+name: overstory-{{AGENT_NAME}}
+description: Agent {{CAPABILITY}} for OpenCode - Task {{TASK_ID}}
+---
+
+# Agent {{AGENT_NAME}} ({{CAPABILITY}})
+
+## Task Information
+
+- **Task ID**: {{TASK_ID}}
+- **Capability**: {{CAPABILITY}}
+- **Branch**: {{BRANCH_NAME}}
+- **Worktree**: {{WORKTREE_PATH}}
+- **Parent**: {{PARENT_AGENT}}
+- **Depth**: {{DEPTH}}
+
+## Mission
+
+{{SPEC_INSTRUCTION}}
+
+## File Scope
+
+{{FILE_SCOPE}}
+
+## Capabilities
+
+{{BASE_DEFINITION}}
+
+## Communication
+
+### Check Messages
+```bash
+ov mail check --agent {{AGENT_NAME}}
+```
+
+### Send Message
+```bash
+ov mail send --to {{PARENT_AGENT}} --subject "Your subject" --body "Your message" --agent {{AGENT_NAME}}
+```
+
+### Report Completion
+```bash
+ov mail send --to {{PARENT_AGENT}} --subject "Worker done: {{TASK_ID}}" --body "Task completed successfully" --type worker_done --agent {{AGENT_NAME}}
+```
+
+## Quality Gates
+
+{{QUALITY_GATES}}
+
+## Constraints
+
+{{CONSTRAINTS}}
+
+{{SKIP_SCOUT}}
+
+## OpenCode Context
+
+This agent is running in OpenCode mode with the following configuration:
+
+- **Spawn Method**: {{#if (eq CAPABILITY "coordinator")}}persistent subprocess{{else if (eq CAPABILITY "supervisor")}}persistent subprocess{{else if (eq CAPABILITY "monitor")}}persistent subprocess{{else}}ephemeral task{{/if}}
+- **SQLite Mail**: `.overstory/mail.db`
+- **Plugin Integration**: Automatic context injection
+- **Worktree Isolation**: All writes restricted to {{WORKTREE_PATH}}
+
+### Environment Variables
+
+```
+OVERSTORY_AGENT_NAME={{AGENT_NAME}}
+OVERSTORY_AGENT_CAPABILITY={{CAPABILITY}}
+OVERSTORY_TASK_ID={{TASK_ID}}
+OVERSTORY_WORKTREE_PATH={{WORKTREE_PATH}}
+OVERSTORY_PARENT_AGENT={{PARENT_AGENT}}
+OVERSTORY_DEPTH={{DEPTH}}
+```
+
+## Startup Protocol
+
+1. **Load Context**: Review this CLAUDE.md
+2. **Check Mail**: Run `ov mail check --agent {{AGENT_NAME}}`
+3. **Execute Task**: Based on your {{CAPABILITY}} capability
+4. **Report**: Send completion message via `ov mail send`
+
+## Resources
+
+- Overstory Documentation: https://github.com/isaakdjedje-byte/overstory
+- OpenCode Skills: See `opencode-skill/SKILL.md`
+- Original: https://github.com/jayminwest/overstory
